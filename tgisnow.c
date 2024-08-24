@@ -15,51 +15,69 @@
 #define BITMAP_SIZE (BITMAP_WIDTH * BITMAP_HEIGHT / 4)
 #define BUFFER_SIZE (SCREEN_BYTES_PER_LINE * BITMAP_HEIGHT)
 
+#define PMG_BASE 0xC000
+#define SPRITE_WIDTH 8
+#define SPRITE_HEIGHT 8
+#define SPRITE_POS_X 0x64   // Pozycja X sprite'a w heksadecymalnej
+#define SPRITE_POS_Y 0x32   // Pozycja Y sprite'a w heksadecymalnej
+
 // Makra do zapisu do pamięci
 #define poke(addr, val) (*(unsigned char*) (addr) = (val))
 #define pokew(addr, val) (*(unsigned int*) (addr) = (val))
 
+// Definicja danych duszka - napis ATARI (8x8 pikseli)
+const unsigned char atari_sprite[] = {
+    0xFF, // AAAAAAAA
+    0x81, // A......A
+    0xBD, // A.XXXX.X
+    0xBD, // A.XXXX.X
+    0xBD, // A.XXXX.X
+    0xBD, // A.XXXX.X
+    0x81, // A......A
+    0xFF  // AAAAAAAA
+};
+
 // Asemblerowa funkcja kopiująca blok pamięci (używana do rysowania)
 void mover(int n1, const unsigned char *n2, int n3, int n4, int n5)
 {
-   pokew(0xCB, n1);                 // Adres docelowy w pamięci ekranu
-   pokew(0xCD, (unsigned int)n2);   // Rzutowanie wskaźnika na typ całkowity
-   poke(0xCF, n3);                  // Liczba bajtów na wiersz
-   poke(0xD2, n4);                  // Liczba wierszy
-   poke(0xD0, n5);                  // Liczba bajtów na wiersz w pamięci ekranu
+    pokew(0xCB, n1);                 // Adres docelowy w pamięci ekranu
+    pokew(0xCD, (unsigned int)n2);   // Rzutowanie wskaźnika na typ całkowity
+    poke(0xCF, n3);                  // Liczba bajtów na wiersz
+    poke(0xD2, n4);                  // Liczba wierszy
+    poke(0xD0, n5);                  // Liczba bajtów na wiersz w pamięci ekranu
 
-   asm("  LDX $D2");
-   asm("_label4:");
-   asm("  LDY $CF");
-   asm("  DEY");
-   asm("_label1:");
-   asm("  LDA ($CD),Y");
-   asm("  STA ($CB),Y");
-   asm("  DEY");
-   asm("  CPY #$FF");
-   asm("  BNE _label1");
-   asm("  CLC");
-   asm("  LDA $CB");
-   asm("  ADC $D0");
-   asm("  STA $CB");
-   asm("  BCC _label2");
-   asm("  INC $CC");
-   asm("_label2:");
-   asm("  CLC");
-   asm("  LDA $CD");
-   asm("  ADC $CF");
-   asm("  STA $CD");
-   asm("  BCC _label3");
-   asm("  INC $CE");
-   asm("_label3:");
-   asm("  DEX");
-   asm("  BNE _label4");
+    asm("  LDX $D2");
+    asm("_label4:");
+    asm("  LDY $CF");
+    asm("  DEY");
+    asm("_label1:");
+    asm("  LDA ($CD),Y");
+    asm("  STA ($CB),Y");
+    asm("  DEY");
+    asm("  CPY #$FF");
+    asm("  BNE _label1");
+    asm("  CLC");
+    asm("  LDA $CB");
+    asm("  ADC $D0");
+    asm("  STA $CB");
+    asm("  BCC _label2");
+    asm("  INC $CC");
+    asm("_label2:");
+    asm("  CLC");
+    asm("  LDA $CD");
+    asm("  ADC $CF");
+    asm("  STA $CD");
+    asm("  BCC _label3");
+    asm("  INC $CE");
+    asm("_label3:");
+    asm("  DEX");
+    asm("  BNE _label4");
 }
 
 // Funkcja aktywująca display list
 void activate_display_list(char* dl) {
-    POKE(0x230, (unsigned int)dl & 0xFF);
-    POKE(0x231, ((unsigned int)dl >> 8) & 0xFF);
+    POKE(0x230, (unsigned char)((unsigned int)dl & 0xFF));
+    POKE(0x231, (unsigned char)(((unsigned int)dl >> 8) & 0xFF));
 }
 
 // Funkcja czekająca na VBlank
@@ -81,14 +99,14 @@ char* create_display_list(unsigned char* bitmap_data) {
 
     // Load Memory Scan (LMS) with Antic Mode F
     *p++ = 0x4F; // LMS + Antic Mode F
-    *p++ = addr & 0xFF;
-    *p++ = (addr >> 8) & 0xFF;
+    *p++ = (unsigned char)(addr & 0xFF);
+    *p++ = (unsigned char)((addr >> 8) & 0xFF);
 
     // Pozostałe linie ekranu w Antic Mode F
     for (i = 0; i < BITMAP_HEIGHT; ++i) {
         *p++ = 0x4F; // Antic Mode F
-        *p++ = (addr + i * SCREEN_BYTES_PER_LINE) & 0xFF;
-        *p++ = ((addr + i * SCREEN_BYTES_PER_LINE) >> 8) & 0xFF;
+        *p++ = (unsigned char)((addr + i * SCREEN_BYTES_PER_LINE) & 0xFF);
+        *p++ = (unsigned char)(((addr + i * SCREEN_BYTES_PER_LINE) >> 8) & 0xFF);
     }
 
     // Wypełnienie reszty ekranu pustymi liniami
@@ -98,8 +116,8 @@ char* create_display_list(unsigned char* bitmap_data) {
 
     // Koniec Display List
     *p++ = 0x41;  // JVB
-    *p++ = (unsigned int)dl & 0xFF;
-    *p++ = ((unsigned int)dl >> 8) & 0xFF;
+    *p++ = (unsigned char)((unsigned int)dl & 0xFF);
+    *p++ = (unsigned char)(((unsigned int)dl >> 8) & 0xFF);
 
     return (char*)dl;
 }
@@ -132,12 +150,35 @@ void copy_buffer_to_screen(unsigned char* buffer_memory, unsigned char* screen_m
     memcpy(screen_memory, buffer_memory, BUFFER_SIZE);
 }
 
+// Funkcja inicjalizująca PMG (Player/Missile Graphics)
+void init_pmg() {
+    // Włączenie PMG
+    POKE(0xD00D, 0x03);  // GRACTL - Włączenie PMG dla graczy i pocisków
+    POKE(0xD400, 0x22);  // DMACTL - Włączenie DMA dla PMG
+
+    // Ustawienie bazowej pamięci PMG na 0xC000
+    POKE(0xD407, 0xC0); // PMBASE ustawiony na 0xC000
+    memset((void*)PMG_BASE, 0, 512); // Wyczyszczenie pamięci PMG
+
+    // Skopiowanie danych sprite'a do pamięci PMG
+    memcpy((void*)(PMG_BASE + 0x380), atari_sprite, SPRITE_HEIGHT);
+
+    // Ustawienie koloru gracza 0 na różowy
+    POKE(0xD012, 0xE0); // Kolor duszka (różowy)
+
+    // Ustawienie początkowej pozycji sprite'a
+    POKE(0xD000, SPRITE_POS_X); // Pozycja X gracza 0
+    POKE(0xD001, SPRITE_POS_Y); // Pozycja Y gracza 0
+}
+
 // Główna funkcja
 void main(void) {
     char* dl;
     unsigned char* screen_memory = (unsigned char*)0x4000;
     unsigned char buffer_memory[BUFFER_SIZE]; // Bufor do podwójnego buforowania
     int offset = 0;
+    int sprite_x = SPRITE_POS_X, sprite_y = SPRITE_POS_Y;
+    int sprite_dx = 1, sprite_dy = 1;
 
     // Inicjalizacja trybu graficznego
     _graphics(10);
@@ -155,43 +196,34 @@ void main(void) {
     dl = create_display_list(screen_memory);
     activate_display_list(dl);
 
-    // Animacja żaby z przesuwającym się tłem
+    // Inicjalizacja PMG (sprite'a)
+    init_pmg();
+
+    // Animacja żaby z przesuwającym się tłem i sprite'em
     while (!kbhit()) {
         wait_for_vblank();  // Synchronize with the VBlank
         draw_background(buffer_memory, offset);  // Rysowanie przesuniętego tła w buforze
         draw_frog(buffer_memory, frog1);         // Rysowanie żaby (1 klatka) w buforze
         copy_buffer_to_screen(buffer_memory, screen_memory);  // Kopiowanie bufora na ekran
-        offset = (offset + 1) % 64;  // Zwiększanie offsetu, aby tło przesuwało się
+        offset = (offset + 3) % 64;  // Zwiększanie offsetu, aby tło przesuwało się
+
+        // Aktualizacja pozycji sprite'a
+        sprite_x += sprite_dx;
+        sprite_y += sprite_dy;
+
+        // Zmiana kierunku, gdy napotka krawędzie ekranu
+        if (sprite_x <= 0 || sprite_x >= 152) sprite_dx = -sprite_dx;
+        if (sprite_y <= 0 || sprite_y >= 192) sprite_dy = -sprite_dy;
+
+        // Ustawianie pozycji sprite'a (napis "ATARI")
+        POKE(0xD000, sprite_x); // Pozycja X gracza 0
+        POKE(0xD001, sprite_y); // Pozycja Y gracza 0
 
         wait_for_vblank();
         draw_background(buffer_memory, offset);
         draw_frog(buffer_memory, frog2);
         copy_buffer_to_screen(buffer_memory, screen_memory);
-        offset = (offset + 2) % 64;
-
-        wait_for_vblank();
-        draw_background(buffer_memory, offset);
-        draw_frog(buffer_memory, frog3);
-        copy_buffer_to_screen(buffer_memory, screen_memory);
-        offset = (offset + 2) % 64;
-
-        wait_for_vblank();
-        draw_background(buffer_memory, offset);
-        draw_frog(buffer_memory, frog4);
-        copy_buffer_to_screen(buffer_memory, screen_memory);
-        offset = (offset + 2) % 64;
-
-        wait_for_vblank();
-        draw_background(buffer_memory, offset);
-        draw_frog(buffer_memory, frog5);
-        copy_buffer_to_screen(buffer_memory, screen_memory);
-        offset = (offset + 2) % 64;
-
-        wait_for_vblank();
-        draw_background(buffer_memory, offset);
-        draw_frog(buffer_memory, frog6);
-        copy_buffer_to_screen(buffer_memory, screen_memory);
-        offset = (offset + 2) % 64;
+        offset = (offset + 3) % 64;
     }
 
     // Czekanie na naciśnięcie klawisza przed zakończeniem
