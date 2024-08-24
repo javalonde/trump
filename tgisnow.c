@@ -13,28 +13,14 @@
 #define BYTES_PER_LINE (BITMAP_WIDTH / 4)
 #define SCREEN_BYTES_PER_LINE (SCREEN_WIDTH / 4)
 #define BITMAP_SIZE (BITMAP_WIDTH * BITMAP_HEIGHT / 4)
+#define BUFFER_SIZE (SCREEN_BYTES_PER_LINE * BITMAP_HEIGHT)
 
 // Makra do zapisu do pamięci
 #define poke(addr, val) (*(unsigned char*) (addr) = (val))
 #define pokew(addr, val) (*(unsigned int*) (addr) = (val))
 
-// Background pattern buffer
-unsigned char background_pattern[SCREEN_BYTES_PER_LINE];
-
-// Initialize the background pattern (simple vertical stripes for this example)
-void init_background_pattern(void) {
-    int i;
-    for (i = 0; i < SCREEN_BYTES_PER_LINE; ++i) {
-        if (i % 2 == 0) {
-            background_pattern[i] = 0xAA; // Example pattern (binary: 10101010)
-        } else {
-            background_pattern[i] = 0x55; // Example pattern (binary: 01010101)
-        }
-    }
-}
-
 // Asemblerowa funkcja kopiująca blok pamięci (używana do rysowania)
-void mover(int n1, unsigned char *n2, int n3, int n4, int n5)
+void mover(int n1, const unsigned char *n2, int n3, int n4, int n5)
 {
    pokew(0xCB, n1);                 // Adres docelowy w pamięci ekranu
    pokew(0xCD, (unsigned int)n2);   // Rzutowanie wskaźnika na typ całkowity
@@ -68,6 +54,12 @@ void mover(int n1, unsigned char *n2, int n3, int n4, int n5)
    asm("_label3:");
    asm("  DEX");
    asm("  BNE _label4");
+}
+
+// Funkcja aktywująca display list
+void activate_display_list(char* dl) {
+    POKE(0x230, (unsigned int)dl & 0xFF);
+    POKE(0x231, ((unsigned int)dl >> 8) & 0xFF);
 }
 
 // Funkcja czekająca na VBlank
@@ -112,32 +104,39 @@ char* create_display_list(unsigned char* bitmap_data) {
     return (char*)dl;
 }
 
-// Funkcja aktywująca display list
-void activate_display_list(char* dl) {
-    POKE(0x230, (unsigned int)dl & 0xFF);
-    POKE(0x231, ((unsigned int)dl >> 8) & 0xFF);
-}
-
-// Funkcja rysująca tło
-void draw_background(unsigned char* screen_memory, int offset) {
+// Funkcja rysująca tło z przesunięciem w poziomie
+void draw_background(unsigned char* buffer_memory, int offset) {
     int y;
     for (y = 0; y < BITMAP_HEIGHT; ++y) {
-        mover((int)(screen_memory + y * SCREEN_BYTES_PER_LINE), background_pattern + offset, SCREEN_BYTES_PER_LINE, 1, SCREEN_BYTES_PER_LINE);
+        const unsigned char* tile_ptr = background_tile + ((64 - offset + y) % 64) * 32; // 64 rows, each row 32 bytes
+        mover((int)(buffer_memory + y * SCREEN_BYTES_PER_LINE), tile_ptr, SCREEN_BYTES_PER_LINE, 1, SCREEN_BYTES_PER_LINE);
     }
 }
 
-// Funkcja rysująca żabkę na ekranie
-void draw_frog(unsigned char* screen_memory, const unsigned char* frame_data) {
-    int y;
+// Funkcja rysująca żabkę na ekranie z uwzględnieniem zerowych danych
+void draw_frog(unsigned char* buffer_memory, const unsigned char* frame_data) {
+    int y, x;
     for (y = 0; y < BITMAP_HEIGHT; ++y) {
-        mover((int)(screen_memory + y * SCREEN_BYTES_PER_LINE + (SCREEN_BYTES_PER_LINE / 2 - BYTES_PER_LINE / 2)), (unsigned char*)(frame_data + y * BYTES_PER_LINE), BYTES_PER_LINE, 1, SCREEN_BYTES_PER_LINE);
+        for (x = 0; x < BYTES_PER_LINE; ++x) {
+            unsigned char pixel = frame_data[y * BYTES_PER_LINE + x];
+            if (pixel != 0x00) {
+                mover((int)(buffer_memory + y * SCREEN_BYTES_PER_LINE + (SCREEN_BYTES_PER_LINE / 2 - BYTES_PER_LINE / 2) + x), 
+                      &pixel, 1, 1, SCREEN_BYTES_PER_LINE);
+            }
+        }
     }
+}
+
+// Funkcja kopiująca bufor do pamięci ekranu
+void copy_buffer_to_screen(unsigned char* buffer_memory, unsigned char* screen_memory) {
+    memcpy(screen_memory, buffer_memory, BUFFER_SIZE);
 }
 
 // Główna funkcja
 void main(void) {
     char* dl;
     unsigned char* screen_memory = (unsigned char*)0x4000;
+    unsigned char buffer_memory[BUFFER_SIZE]; // Bufor do podwójnego buforowania
     int offset = 0;
 
     // Inicjalizacja trybu graficznego
@@ -152,9 +151,6 @@ void main(void) {
     POKE(711, 0);   // COLOR4
     POKE(712, 50);  // COLOR5
 
-    // Inicjalizacja wzoru tła
-    init_background_pattern();
-
     // Tworzenie i aktywacja display list
     dl = create_display_list(screen_memory);
     activate_display_list(dl);
@@ -162,34 +158,40 @@ void main(void) {
     // Animacja żaby z przesuwającym się tłem
     while (!kbhit()) {
         wait_for_vblank();  // Synchronize with the VBlank
-        draw_background(screen_memory, offset);  // Najpierw rysowanie tła
-        draw_frog(screen_memory, frog1);         // Następnie rysowanie żaby (1 klatka)
-        offset = (offset + 1) % SCREEN_BYTES_PER_LINE;
+        draw_background(buffer_memory, offset);  // Rysowanie przesuniętego tła w buforze
+        draw_frog(buffer_memory, frog1);         // Rysowanie żaby (1 klatka) w buforze
+        copy_buffer_to_screen(buffer_memory, screen_memory);  // Kopiowanie bufora na ekran
+        offset = (offset + 1) % 64;  // Zwiększanie offsetu, aby tło przesuwało się
 
-        wait_for_vblank();  // Synchronize with the VBlank
-        draw_background(screen_memory, offset);  // Rysowanie tła ponownie
-        draw_frog(screen_memory, frog2);
-        offset = (offset + 1) % SCREEN_BYTES_PER_LINE;
+        wait_for_vblank();
+        draw_background(buffer_memory, offset);
+        draw_frog(buffer_memory, frog2);
+        copy_buffer_to_screen(buffer_memory, screen_memory);
+        offset = (offset + 2) % 64;
 
-        wait_for_vblank();  // Synchronize with the VBlank
-        draw_background(screen_memory, offset);  // Rysowanie tła ponownie
-        draw_frog(screen_memory, frog3);
-        offset = (offset + 1) % SCREEN_BYTES_PER_LINE;
+        wait_for_vblank();
+        draw_background(buffer_memory, offset);
+        draw_frog(buffer_memory, frog3);
+        copy_buffer_to_screen(buffer_memory, screen_memory);
+        offset = (offset + 2) % 64;
 
-        wait_for_vblank();  // Synchronize with the VBlank
-        draw_background(screen_memory, offset);  // Rysowanie tła ponownie
-        draw_frog(screen_memory, frog4);
-        offset = (offset + 1) % SCREEN_BYTES_PER_LINE;
+        wait_for_vblank();
+        draw_background(buffer_memory, offset);
+        draw_frog(buffer_memory, frog4);
+        copy_buffer_to_screen(buffer_memory, screen_memory);
+        offset = (offset + 2) % 64;
 
-        wait_for_vblank();  // Synchronize with the VBlank
-        draw_background(screen_memory, offset);  // Rysowanie tła ponownie
-        draw_frog(screen_memory, frog5);
-        offset = (offset + 1) % SCREEN_BYTES_PER_LINE;
+        wait_for_vblank();
+        draw_background(buffer_memory, offset);
+        draw_frog(buffer_memory, frog5);
+        copy_buffer_to_screen(buffer_memory, screen_memory);
+        offset = (offset + 2) % 64;
 
-        wait_for_vblank();  // Synchronize with the VBlank
-        draw_background(screen_memory, offset);  // Rysowanie tła ponownie
-        draw_frog(screen_memory, frog6);
-        offset = (offset + 1) % SCREEN_BYTES_PER_LINE;
+        wait_for_vblank();
+        draw_background(buffer_memory, offset);
+        draw_frog(buffer_memory, frog6);
+        copy_buffer_to_screen(buffer_memory, screen_memory);
+        offset = (offset + 2) % 64;
     }
 
     // Czekanie na naciśnięcie klawisza przed zakończeniem
