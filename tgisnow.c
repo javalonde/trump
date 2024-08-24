@@ -18,18 +18,17 @@
 #define poke(addr, val) (*(unsigned char*) (addr) = (val))
 #define pokew(addr, val) (*(unsigned int*) (addr) = (val))
 
-// Wzór tła z pionowymi liniami
+// Background pattern buffer
 unsigned char background_pattern[SCREEN_BYTES_PER_LINE];
 
-// Funkcja inicjująca wzór tła z pionowymi liniami
+// Initialize the background pattern (simple vertical stripes for this example)
 void init_background_pattern(void) {
     int i;
     for (i = 0; i < SCREEN_BYTES_PER_LINE; ++i) {
-        // Linie pionowe co 8 bajtów
-        if (i % 8 == 0) {
-            background_pattern[i] = 0xFF; // Pełna linia pionowa
+        if (i % 2 == 0) {
+            background_pattern[i] = 0xAA; // Example pattern (binary: 10101010)
         } else {
-            background_pattern[i] = 0x00; // Przerwa
+            background_pattern[i] = 0x55; // Example pattern (binary: 01010101)
         }
     }
 }
@@ -69,6 +68,11 @@ void mover(int n1, unsigned char *n2, int n3, int n4, int n5)
    asm("_label3:");
    asm("  DEX");
    asm("  BNE _label4");
+}
+
+// Funkcja czekająca na VBlank
+void wait_for_vblank() {
+    while (PEEK(0xD40B) != 0) {}  // Wait for VCOUNT to reset to 0
 }
 
 // Funkcja tworząca display list dla bitmapy 35x32
@@ -114,7 +118,7 @@ void activate_display_list(char* dl) {
     POKE(0x231, ((unsigned int)dl >> 8) & 0xFF);
 }
 
-// Funkcja rysująca tło z liniami
+// Funkcja rysująca tło
 void draw_background(unsigned char* screen_memory, int offset) {
     int y;
     for (y = 0; y < BITMAP_HEIGHT; ++y) {
@@ -157,26 +161,32 @@ void main(void) {
 
     // Animacja żaby z przesuwającym się tłem
     while (!kbhit()) {
+        wait_for_vblank();  // Synchronize with the VBlank
         draw_background(screen_memory, offset);  // Najpierw rysowanie tła
         draw_frog(screen_memory, frog1);         // Następnie rysowanie żaby (1 klatka)
         offset = (offset + 1) % SCREEN_BYTES_PER_LINE;
 
+        wait_for_vblank();  // Synchronize with the VBlank
         draw_background(screen_memory, offset);  // Rysowanie tła ponownie
         draw_frog(screen_memory, frog2);
         offset = (offset + 1) % SCREEN_BYTES_PER_LINE;
 
+        wait_for_vblank();  // Synchronize with the VBlank
         draw_background(screen_memory, offset);  // Rysowanie tła ponownie
         draw_frog(screen_memory, frog3);
         offset = (offset + 1) % SCREEN_BYTES_PER_LINE;
 
+        wait_for_vblank();  // Synchronize with the VBlank
         draw_background(screen_memory, offset);  // Rysowanie tła ponownie
         draw_frog(screen_memory, frog4);
         offset = (offset + 1) % SCREEN_BYTES_PER_LINE;
 
+        wait_for_vblank();  // Synchronize with the VBlank
         draw_background(screen_memory, offset);  // Rysowanie tła ponownie
         draw_frog(screen_memory, frog5);
         offset = (offset + 1) % SCREEN_BYTES_PER_LINE;
 
+        wait_for_vblank();  // Synchronize with the VBlank
         draw_background(screen_memory, offset);  // Rysowanie tła ponownie
         draw_frog(screen_memory, frog6);
         offset = (offset + 1) % SCREEN_BYTES_PER_LINE;
